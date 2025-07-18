@@ -3,6 +3,7 @@
 // 1. Course dimensions
 // 2. LZ / OZ dimensions
 // 3. Obstacle / LZ / OZ Materials
+// 4. Simulation frame rate
 
 // All units here are in meters
 
@@ -14,7 +15,9 @@ using System;
 using UnityEngine;
 
 public static class environmentData
-{ 
+{
+    // Frame rate for the simulation
+    public const int simRate = 60; // Physics simulation rate in Hz
 
     // Mission 1.1: Productivity
     public const float depotwideWidth = 9f;

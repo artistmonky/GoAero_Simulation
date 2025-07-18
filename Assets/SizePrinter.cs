@@ -1,16 +1,18 @@
 using UnityEngine;
 
-public class SizePrinter : MonoBehaviour
+public class MeshSizeLogger : MonoBehaviour
 {
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
-        
-    }
-
-    // Update is called once per frame
-    void Update()
-    {
-        
+        Renderer rend = GetComponentInChildren<Renderer>();
+        if (rend != null)
+        {
+            Vector3 size = rend.bounds.size;
+            Debug.Log("Model Size (in meters): " + size);
+        }
+        else
+        {
+            Debug.LogWarning("No Renderer found in children of " + gameObject.name);
+        }
     }
 }
