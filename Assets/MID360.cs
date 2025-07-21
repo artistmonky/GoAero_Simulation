@@ -10,14 +10,14 @@ public struct LidarRayGrid // This struct defines a grid of lidar rays for the M
     public float minElevation; // Minimum elevation angle in degrees
     public NativeArray<Vector3> directions;
 
-    public LidarRayGrid(int azimuthSteps, int elevationSteps, float maxElevation, float minElevation, Allocator allocator)
+    public LidarRayGrid(int azimuthSteps, int elevationSteps, float maxElevation, float minElevation, int sectionCount, Allocator allocator)
     {
         this.azimuthSteps = azimuthSteps;
         this.elevationSteps = elevationSteps;
         this.maxElevation = maxElevation;
         this.minElevation = minElevation;
-        this.directions = new NativeArray<Vector3>(azimuthSteps * elevationSteps, allocator);
-        InitializeLidarGrid();
+        this.directions = new NativeArray<Vector3>(sectionCount * elevationSteps, allocator);
+        InitializeLidarGrid(sectionCount);
     }
 
     public void Dispose()
@@ -41,9 +41,9 @@ public struct LidarRayGrid // This struct defines a grid of lidar rays for the M
         directions[Index(azimuthIndex, elevationIndex)] = dir;
     }
 
-    public void InitializeLidarGrid()
+    public void InitializeLidarGrid(int sectionCount)
     {
-        for (int az = 0; az < azimuthSteps; az++)
+        for (int az = 0; az < sectionCount; az++)
         {
             float yaw = (float)az / azimuthSteps * 360f;
 
@@ -69,17 +69,17 @@ public class MID360 : MonoBehaviour
     public string modelPath;
 
     [Header("LiDAR Settings")]
+    public LidarRayGrid rayGrid;
     public int azimuthSteps; // number of azimuth steps around the sensor's 360-degree horizontal field of view
     public int elevationSteps; // number of elevation steps along the sensor's 62.44 vertical field of view (ranging from -7.22 to +55.22, as per LIVOX simulation https://github.com/Livox-SDK/livox_laser_simulation/blob/main/urdf/livox_mid360.xacro)
     public float maxElevation;
     public float minElevation;
-    public LidarRayGrid rayGrid;
-    public int section; // This determines which section of the MID360's lidar pattern is being casted. It increments from 1 to the physics sim rate, and then loops back to 1.
     public int sectionCount; // Total number of vertical lines of lidar rays in each section
-    public int totalSections; // Number of sections in each full 360-degree scan
-    public int scanRate = environmentData.simRate; // The scan rate of the MID360, as per data sheet
+    public int scanRate; // The scan rate of the MID360, as per data sheet, in Hz
+    public int scanWidth; // Angular rate of the MID360 between physics simulation frames in degrees. 
     public float maxDistance; // Maximum distance for raycasting. TODO: IMPLEMENT REFLECTIVITY / DISTANCE COMPUTATION BASED ON DATASHEET
     public float minDistance; // Minimum distance for raycasting, based on datasheet
+
 
     [Header("Hit Marker")]
     public GameObject hitMarkerPrefab;
@@ -95,20 +95,20 @@ public class MID360 : MonoBehaviour
         // Set position 
         Vector3 position = new Vector3(0, (float)60.10 / 1000 / 2, 1);
         this.transform.position = position;
+        this.transform.rotation = Quaternion.Euler(45, 0, 0); // Set initial rotation
         //TODO: Set rotation if needed
 
         // Initialize Lidar Sensor Grid
         azimuthSteps = 360;
-        elevationSteps = 40; // Number of lidar rays in each vertical line, as per datasheet
+        elevationSteps = 40;
         maxElevation = 55.22f;
         minElevation = -7.22f;
-        rayGrid = new LidarRayGrid(azimuthSteps, elevationSteps, maxElevation, minElevation, Allocator.Persistent);
-        scanRate = 10; // Scan rate of the MID360, as per datasheet, expressed in Hz 
-        section = 1; // Start at section 1
-        sectionCount = azimuthSteps * scanRate / environmentData.simRate; // Total number of vertical lines of lidar rays in each section. TODO: Think about this more: what happens if sim rate is not an integer / clean divisor?
-        totalSections = environmentData.simRate / scanRate;
+        scanRate = 10;
+        scanWidth = (360 * scanRate) / environmentData.simRate; // TODO: What if this isn't a clean divisor of 360? Round it?
+        sectionCount = azimuthSteps * scanRate / environmentData.simRate; // TODO: Think about this more: what happens if sim rate is not an integer / clean divisor?
         maxDistance = 70f;
         minDistance = 0.1f;
+        rayGrid = new LidarRayGrid(azimuthSteps, elevationSteps, maxElevation, minElevation, sectionCount, Allocator.Persistent);
 
         // Initialize the list of active markers
         activeMarkers = new List<GameObject>();
@@ -166,16 +166,27 @@ public class MID360 : MonoBehaviour
             activeMarkers.Clear();
         }
 
-        // Visualize casted lidar rays in red
-        int start = (section - 1) * sectionCount * elevationSteps;
-        int end = Mathf.Min(section * sectionCount * elevationSteps, azimuthSteps * sectionCount * elevationSteps);
-        //Debug.Log("start is: " + start);
-        //Debug.Log("end is: " + end);
 
-        for (int ray = start; ray < end; ray++)
+        // Interpolate azimuth, zenith values
+        // need to create some vector called the supervector that is updated by the az transform every frame?
+
+
+        // Create rotation for lidar scan pattern, consisting of rotation about lidar axis and the az transform
+
+
+        // Visualize casted lidar rays in red
+        for (int ray = 0; ray < sectionCount * elevationSteps; ray++)
         {
-            Vector3 dir = rayGrid.directions[ray];
-            Vector3 origin = transform.position + dir * 0.1f; // Start slightly above the MID360 to avoid self-collision
+            rayGrid.directions[ray] = // rotate ray by lidar's current rotation
+
+
+            // rotate lidar scan pattern by scanWidth degrees around lidar's vertical axis, 
+            rayGrid.directions[ray].RotateAround(this.transform.position, this.transform.up, scanWidth);
+
+            // apply az transform
+
+            //rayGrid.directions[ray] ; // rotate by 60 degrees around the 
+            Vector3 origin = transform.position + dir * minDistance; // Start at minimum detection distance of 10cm
             if (Physics.Raycast(origin, dir, out RaycastHit hit, maxDistance))
             {
                 Debug.DrawLine(origin, hit.point, Color.red); // Draw up to the hit point      
@@ -192,14 +203,11 @@ public class MID360 : MonoBehaviour
                 }
                 activeMarkers.Add(s);
             }
-            //else
-            //{
-            //    Debug.DrawLine(origin, origin + dir * maxDistance, Color.red); // If there's no hit, draw the full ray in red
-            //}
+            else
+            {
+                Debug.DrawLine(origin, origin + dir * maxDistance, Color.red); // If there's no hit, draw the full ray in red
+            }
         }
-
-
-        section = section % totalSections + 1; ; // Update the section for the next simulation frame
     }
 
 

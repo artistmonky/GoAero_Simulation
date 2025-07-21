@@ -17,7 +17,7 @@ using UnityEngine;
 public static class environmentData
 {
     // Frame rate for the simulation
-    public const int simRate = 60; // Physics simulation rate in Hz
+    public const int simRate = 60; // Physics simulation rate in Hz. MUST BE A WHOLE NUMBER AND A FACTOR OF 360!!!!
 
     // Mission 1.1: Productivity
     public const float depotwideWidth = 9f;
