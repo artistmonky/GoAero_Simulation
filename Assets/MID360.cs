@@ -1,5 +1,6 @@
 using UnityEngine;
 using Unity.Collections;
+using System.Collections.Generic;
 
 public struct LidarRayGrid // This struct defines a grid of lidar rays for the MID360, with azimuth and elevation steps.
 {
@@ -50,7 +51,7 @@ public struct LidarRayGrid // This struct defines a grid of lidar rays for the M
             {
                 float elevation = Mathf.Lerp(minElevation, maxElevation, (float)el / (elevationSteps - 1));
 
-                Quaternion rotation = Quaternion.Euler(-elevation, yaw, 0f); // Unity uses a left handed coordinate system for whatever fuck reason
+                Quaternion rotation = Quaternion.Euler(-elevation, yaw, 0f); // Note the negative sign on elevation cuz Unity uses a left handed coordinate system for whatever fuck reason
                 Vector3 direction = rotation * Vector3.forward;
                 Set(az, el, direction.normalized);
             }
@@ -66,6 +67,8 @@ public class MID360 : MonoBehaviour
     //--------------------------------------------------------------------------------------------------------------------------------------
     // Path in the Assets folder (no extension)
     public string modelPath;
+
+    [Header("LiDAR Settings")]
     public int azimuthSteps; // number of azimuth steps around the sensor's 360-degree horizontal field of view
     public int elevationSteps; // number of elevation steps along the sensor's 62.44 vertical field of view (ranging from -7.22 to +55.22, as per LIVOX simulation https://github.com/Livox-SDK/livox_laser_simulation/blob/main/urdf/livox_mid360.xacro)
     public float maxElevation;
@@ -73,7 +76,14 @@ public class MID360 : MonoBehaviour
     public LidarRayGrid rayGrid;
     public int section; // This determines which section of the MID360's lidar pattern is being casted. It increments from 1 to the physics sim rate, and then loops back to 1.
     public int sectionCount; // Total number of vertical lines of lidar rays in each section
+    public int totalSections; // Number of sections in each full 360-degree scan
     public int scanRate = environmentData.simRate; // The scan rate of the MID360, as per data sheet
+    public float maxDistance; // Maximum distance for raycasting. TODO: IMPLEMENT REFLECTIVITY / DISTANCE COMPUTATION BASED ON DATASHEET
+    public float minDistance; // Minimum distance for raycasting, based on datasheet
+
+    [Header("Hit Marker")]
+    public GameObject hitMarkerPrefab;
+    List<GameObject> activeMarkers;
     //--------------------------------------------------------------------------------------------------------------------------------------
     // END OF MEMBER VARIABLES
 
@@ -89,13 +99,20 @@ public class MID360 : MonoBehaviour
 
         // Initialize Lidar Sensor Grid
         azimuthSteps = 360;
-        elevationSteps = 40;
+        elevationSteps = 40; // Number of lidar rays in each vertical line, as per datasheet
         maxElevation = 55.22f;
         minElevation = -7.22f;
         rayGrid = new LidarRayGrid(azimuthSteps, elevationSteps, maxElevation, minElevation, Allocator.Persistent);
-        scanRate = 10;
+        scanRate = 10; // Scan rate of the MID360, as per datasheet, expressed in Hz 
         section = 1; // Start at section 1
         sectionCount = azimuthSteps * scanRate / environmentData.simRate; // Total number of vertical lines of lidar rays in each section. TODO: Think about this more: what happens if sim rate is not an integer / clean divisor?
+        totalSections = environmentData.simRate / scanRate;
+        maxDistance = 70f;
+        minDistance = 0.1f;
+
+        // Initialize the list of active markers
+        activeMarkers = new List<GameObject>();
+
 
         // Load mesh and material from the imported .obj
         modelPath = "Models/mid-360-asm";
@@ -132,43 +149,59 @@ public class MID360 : MonoBehaviour
 
     void Update()
     {
-        // Visualize all potential lidar rays in green
-        for (int az = 0; az < rayGrid.azimuthSteps; az++)
+        //// Visualize all potential lidar rays in green
+        //for (int az = 0; az < rayGrid.azimuthSteps; az++)
+        //{
+        //    for (int el = 0; el < rayGrid.elevationSteps; el++)
+        //    {
+        //        Vector3 dir = rayGrid.Get(az, el);
+        //        Debug.DrawRay(transform.position, dir * 0.5f, Color.green);
+        //    }
+        //}
+
+        if (activeMarkers.Count > 1000)
         {
-            for (int el = 0; el < rayGrid.elevationSteps; el++)
-            {
-                Vector3 dir = rayGrid.Get(az, el);
-                Debug.DrawRay(transform.position, dir * 0.5f, Color.green);
-            }
+            for (int i = 0; i < activeMarkers.Count; i++)
+                Destroy(activeMarkers[i]);
+            activeMarkers.Clear();
         }
 
         // Visualize casted lidar rays in red
-        for (int az = (section - 1) * sectionCount; az < (section - 1) * sectionCount; az++)
+        int start = (section - 1) * sectionCount * elevationSteps;
+        int end = Mathf.Min(section * sectionCount * elevationSteps, azimuthSteps * sectionCount * elevationSteps);
+        //Debug.Log("start is: " + start);
+        //Debug.Log("end is: " + end);
+
+        for (int ray = start; ray < end; ray++)
         {
-            for (int el = 0; el < rayGrid.elevationSteps; el++)
+            Vector3 dir = rayGrid.directions[ray];
+            Vector3 origin = transform.position + dir * 0.1f; // Start slightly above the MID360 to avoid self-collision
+            if (Physics.Raycast(origin, dir, out RaycastHit hit, maxDistance))
             {
-                Vector3 dir = rayGrid.Get(az, el);
-                //RaycastHit hit;
-                //if (Physics.Raycast(transform.position, dir, out hit, Mathf.Infinity))
-                //{
-                //    Debug.DrawLine(transform.position, hit.point, Color.red);
-                //}
-                Debug.DrawLine(transform.position, dir * 2f, Color.red);
+                Debug.DrawLine(origin, hit.point, Color.red); // Draw up to the hit point      
+                GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere); // Create a small sphere at the hit point
+                s.transform.position = hit.point;
+                s.transform.localScale = Vector3.one * 0.05f;
+                s.transform.parent = transform;
+                var col = s.GetComponent<Collider>(); // disable its collider
+                if (col) col.enabled = false;
+                var rend = s.GetComponent<Renderer>();
+                if (rend != null)
+                {
+                    rend.material.color = Color.yellow;
+                }
+                activeMarkers.Add(s);
             }
+            //else
+            //{
+            //    Debug.DrawLine(origin, origin + dir * maxDistance, Color.red); // If there's no hit, draw the full ray in red
+            //}
         }
 
-        updateSection(); // Update the section for the next simulation frame
 
+        section = section % totalSections + 1; ; // Update the section for the next simulation frame
     }
 
-    void updateSection()
-    {
-        section++;
-        if (section > environmentData.simRate)
-        {
-            section = 1;
-        }
-    }
 
     void OnDestroy()
     {
