@@ -56,9 +56,9 @@ public struct LidarRayGrid // This struct defines a grid of lidar rays for the M
 
                 // Note the negative sign on elevation. CCW rotations are considered positive.
                 // Also note that we need 2 distinct rotations. They are separated because Unity applies rotations in the Z->X->Y Order in a LEFT HANDED COORDINATE SYSTEM.
-                // The first rotation is around the Y axis (yaw), and the second is around the X axis (elevation).
-                // TODO: CHECK MATH!!!
-                Quaternion rotation = Quaternion.AngleAxis(yaw, Vector3.up) * Quarternion.AngleAxis(elevation, Vector3.right); 
+                // The first rotation is around the local frame's Y axis (yaw), and the second is around the local frame's X axis (elevation).
+                // Note that the x-axis of the local frame is rotated by the first rotation
+                Quaternion rotation = Quaternion.Euler(-elevation, yaw, 0f); 
                 Vector3 direction = rotation * Vector3.forward;
                 Set(az, el, direction.normalized);
             }
@@ -80,8 +80,9 @@ public class MID360 : MonoBehaviour
     public int elevationSteps; // number of elevation steps along the sensor's 62.44 vertical field of view (ranging from -7.22 to +55.22, as per LIVOX simulation https://github.com/Livox-SDK/livox_laser_simulation/blob/main/urdf/livox_mid360.xacro)
     public float azimuthAngle; // the angle by which the lidar scan pattern is rotated horizontally during the az transform
     public float zenithAngle; // the angle by which the lidar scan pattern is rotated vertically during the az transform
-    public float maxElevation; // top of lidar vertical FOV, as per datasheet (55.22 degrees)
-    public float minElevation; // bottom of lidar vertical FOV, as per datasheet (-7.22 degrees)
+    public float maxElevation; // top of lidar vertical FOV, as per datasheet (55.22 degrees). The magnitude of the zenith angle in the az transform is then subtracted from this value.
+    public float minElevation; // bottom of lidar vertical FOV, as per datasheet (-7.22 degrees). The magnitude of the zenith angle in the az transform is then subtracted from this value.
+    public float shrinkage; // The shrinkage angle for the lidar rays
     public LidarRayGrid rayGrid;
     public int section; // This determines which section of the MID360's lidar pattern is being casted. It increments from 1 to the physics sim rate, and then loops back to 1.
     public int sectionCount; // Total number of vertical lines of lidar rays in each section
@@ -103,15 +104,18 @@ public class MID360 : MonoBehaviour
     void Start()
     {
         // Set position 
-        Vector3 position = new Vector3(0, (float)60.10 / 1000 / 2, 1);
+        Vector3 position = new Vector3(environmentData.course3Width / 2,
+                                       0,
+                                       2 * environmentData.obstacleDepthSpacing - 3); ;//new Vector3(0, (float)60.10 / 1000 / 2, 1);
         this.transform.position = position;
         // TODO: Set rotation if needed
 
         // Initialize Lidar Sensor Grid
         azimuthSteps = 360;
         elevationSteps = 40; // Number of lidar rays in each vertical line, as per datasheet
-        maxElevation = 55.22f;
-        minElevation = -7.22f;
+        shrinkage = 1.72f;
+        maxElevation = (55.22f - shrinkage);
+        minElevation = (-7.22f + shrinkage);
         rayGrid = new LidarRayGrid(azimuthSteps, elevationSteps, maxElevation, minElevation, Allocator.Persistent);
         scanRate = 10; // Scan rate of the MID360, as per datasheet, expressed in Hz 
         section = 1; // Start at section 1
@@ -160,7 +164,13 @@ public class MID360 : MonoBehaviour
     void Update()
     {
         float t0 = Time.realtimeSinceStartup; // Find real time
-        Debug.Log($"Time: {t0:F3}s");
+
+        //if (activeMarkers.Count > 90000)
+        //{
+        //    for (int i = 0; i < activeMarkers.Count; i++)
+        //        Destroy(activeMarkers[i]);
+        //    activeMarkers.Clear();
+        //}
 
         float prevSecond = Mathf.Floor(t0); // Find previous second and next second
         float nextSecond = Mathf.Ceil(t0);
@@ -197,18 +207,21 @@ public class MID360 : MonoBehaviour
         {
             Vector3 dir = rayGrid.directions[ray];
             dir = transform.TransformVector(dir); // rotate to match lidar's orientation in the world
-            // TODO: IMPLEMENT THIS, AFTER YOU CHECK THAT THE MATH ON LINE 61 IS CORRECT!!!
-            //azRotation = 
-            //dir = Quaternion.Euler(0, azimuthAngle, zenithAngle) * dir;
-            //dir =  
+            Quaternion azRotation = Quaternion.Euler(-zenithAngle, azimuthAngle, 0f);  // Calculate az transform
+            dir = azRotation * dir; // Apply azimuth and zenith rotation to the direction vector
 
             Vector3 origin = transform.position + dir * minDistance; // Start from minimum distance for object detection
+            
             if (Physics.Raycast(origin, dir, out RaycastHit hit, maxDistance))
-            {
+            { 
                 Debug.DrawLine(origin, hit.point, Color.red); // Draw up to the hit point      
+
+
+
+                // Create and add a marker at the hit point
                 //GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere); // Create a small sphere at the hit point
                 //s.transform.position = hit.point;
-                //s.transform.localScale = Vector3.one * 0.05f;
+                //s.transform.localScale = Vector3.one * 0.01f;
                 //s.transform.parent = transform;
                 //var col = s.GetComponent<Collider>(); // disable its collider
                 //if (col) col.enabled = false;
