@@ -87,10 +87,14 @@ public class MID360 : MonoBehaviour
     public int section; // This determines which section of the MID360's lidar pattern is being casted. It increments from 1 to the physics sim rate, and then loops back to 1.
     public int sectionCount; // Total number of vertical lines of lidar rays in each section
     public int totalSections; // Number of sections in each full 360-degree scan
-    public int scanRate = environmentData.simRate; // The scan rate of the MID360, as per data sheet
-    public float maxDistance; // Maximum distance for raycasting. TODO: IMPLEMENT REFLECTIVITY / DISTANCE COMPUTATION BASED ON DATASHEET
+    public int scanRate = environmentData.simRate; // The scan rate of the MID360, as per data sheet, in Hz
+    public float maxDistance; // Maximum distance for raycasting. This value is arbitrary.
     public float minDistance; // Minimum distance for raycasting, based on datasheet
-    
+    public float hitRegistrationExponent; // hitRegistration determines if an object that is hit by a raycast should be registered according to its reflectivity and distance.
+    public float hitRegistrationConstant; // hitRegistration is calculated as: max distance d for a reflectivity r = hitRegistrationConstant * (r ^ hitRegistrationExponent). If the distance to the object is greater than d, it is not registered.
+    public float angleSigma; // Standard deviation of the lidar ray angles, as per datasheet
+    public float distanceSigma; // Standard deviation of the lidar ray distances, as per datasheet
+    public NativeArray<float> noiseVector;
 
     [Header("Hit Marker")]
     public GameObject hitMarkerPrefab;
@@ -104,9 +108,10 @@ public class MID360 : MonoBehaviour
     void Start()
     {
         // Set position 
-        Vector3 position = new Vector3(environmentData.course3Width / 2,
-                                       0,
-                                       2 * environmentData.obstacleDepthSpacing - 3); ;//new Vector3(0, (float)60.10 / 1000 / 2, 1);
+        Vector3 position = new Vector3(0, (float)60.10 / 1000 / 2, 1);
+        // new Vector3(environmentData.course3Width / 2,
+        //             (float)60.10 / 1000 / 2,
+        //             2 * environmentData.obstacleDepthSpacing - 3);
         this.transform.position = position;
         // TODO: Set rotation if needed
 
@@ -117,12 +122,19 @@ public class MID360 : MonoBehaviour
         maxElevation = (55.22f - shrinkage);
         minElevation = (-7.22f + shrinkage);
         rayGrid = new LidarRayGrid(azimuthSteps, elevationSteps, maxElevation, minElevation, Allocator.Persistent);
-        scanRate = 10; // Scan rate of the MID360, as per datasheet, expressed in Hz 
+        scanRate = 10;
         section = 1; // Start at section 1
-        sectionCount = azimuthSteps * scanRate / environmentData.simRate; // Total number of vertical lines of lidar rays in each section. TODO: Think about this more: what happens if sim rate is not an integer / clean divisor?
+        sectionCount = azimuthSteps * scanRate / environmentData.simRate; // TODO: Think about this more: what happens if sim rate is not an integer / clean divisor?
         totalSections = environmentData.simRate / scanRate;
-        maxDistance = 70f;
+        maxDistance = 85f;
         minDistance = 0.1f;
+        hitRegistrationExponent = 0.369f;
+        hitRegistrationConstant = 15.23f;
+        angleSigma = 0.15f;
+        distanceSigma = 0.03f;
+
+        // Initialize the noise vector for generating random points within the unit circle
+        noiseVector = new NativeArray<float>(Mathf.CeilToInt(sectionCount * elevationSteps * 3 / 2), Allocator.Persistent);
 
         // Initialize the list of active markers
         activeMarkers = new List<GameObject>();
@@ -165,6 +177,24 @@ public class MID360 : MonoBehaviour
     {
         float t0 = Time.realtimeSinceStartup; // Find real time
 
+        for (int i = 0; i < noiseVector.Length / 2;)
+        {
+            // Generate a random point within the unit circle
+            float x = Random.Range(-1f, 1f);
+            float y = Random.Range(-1f, 1f);
+            float s = x * x + y * y;
+            while (s >= 1 || s <= 0) // Ensure the point is within the unit circle
+            {
+                x = Random.Range(-1f, 1f);
+                y = Random.Range(-1f, 1f);
+                s = x * x + y * y;
+            }
+            // Store the generated noise in the noise vector
+            noiseVector[i] = x * Mathf.Sqrt(-2f * Mathf.Log(s) / s); // Marsaglia polar method for generating observations of N(0,1)
+            noiseVector[i+1] = y * Mathf.Sqrt(-2f * Mathf.Log(s) / s);
+            i += 2;
+        }
+
         //if (activeMarkers.Count > 90000)
         //{
         //    for (int i = 0; i < activeMarkers.Count; i++)
@@ -202,23 +232,29 @@ public class MID360 : MonoBehaviour
         int start = (section - 1) * sectionCount * elevationSteps;
         int end = Mathf.Min(section * sectionCount * elevationSteps, azimuthSteps * sectionCount * elevationSteps);
 
-
+        int iter = 0;
         for (int ray = start; ray < end; ray++)
         {
+            float azimuthNoise = noiseVector[iter]; // Get noise measurements
+            float zenithNoise = noiseVector[iter + 1];
+            float distanceNoise = noiseVector[iter + 2];
+            iter++;
+            
             Vector3 dir = rayGrid.directions[ray];
             dir = transform.TransformVector(dir); // rotate to match lidar's orientation in the world
             Quaternion azRotation = Quaternion.Euler(-zenithAngle, azimuthAngle, 0f);  // Calculate az transform
-            dir = azRotation * dir; // Apply azimuth and zenith rotation to the direction vector
+            Quaternion noiseRotation = Quaternion.Euler(zenithNoise * angleSigma, azimuthNoise * angleSigma, 0f); // Apply noise to the direction vector
+            dir = azRotation * noiseRotation * dir; // Apply azRotation and noiseRotation to the direction vector
 
             Vector3 origin = transform.position + dir * minDistance; // Start from minimum distance for object detection
-            
-            if (Physics.Raycast(origin, dir, out RaycastHit hit, maxDistance))
-            { 
-                Debug.DrawLine(origin, hit.point, Color.red); // Draw up to the hit point      
 
+            if (Physics.Raycast(origin, dir, out RaycastHit hit, maxDistance) &&
+                hit.distance < (hitRegistrationConstant * Mathf.Pow(hit.collider.GetComponent<Reflectivity>().reflectivity, hitRegistrationExponent)))
+            {
+                //Debug.DrawLine(origin, hit.point, Color.green); // Draw the ray in green if it hits an object that should be registered
+                hit.point += dir * (distanceNoise * distanceSigma); // Apply distance noise to the hit point
 
-
-                // Create and add a marker at the hit point
+                //// Create and add a marker at the hit point
                 //GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere); // Create a small sphere at the hit point
                 //s.transform.position = hit.point;
                 //s.transform.localScale = Vector3.one * 0.01f;

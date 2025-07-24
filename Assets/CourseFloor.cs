@@ -1,5 +1,6 @@
 using UnityEngine;
 
+[RequireComponent(typeof(Reflectivity))]
 public class CourseFloor : MonoBehaviour
 {
     // Object Dimensions and Position in Meters
@@ -21,6 +22,7 @@ public class CourseFloor : MonoBehaviour
 
         // Define plane
         GameObject courseFloor = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        courseFloor.AddComponent<Reflectivity>().reflectivity = 20f;
         courseFloor.name = "Course Floor";
         courseFloor.transform.SetParent(this.transform);
         courseFloor.transform.localPosition = new Vector3(0, 0, 0);

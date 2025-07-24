@@ -1,5 +1,6 @@
 using UnityEngine;
 
+[RequireComponent(typeof(Reflectivity))]
 public class Obs3 : MonoBehaviour
 {
     private GameObject wall;
@@ -28,6 +29,7 @@ public class Obs3 : MonoBehaviour
 
         // Wall Object
         wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        wall.AddComponent<Reflectivity>().reflectivity = 20f;
         wall.transform.SetParent(this.transform);
         wall.transform.localPosition = new Vector3(0, environmentData.wallHeight / 2, 0);
         wall.transform.localScale = new Vector3(wallWidth, wallHeight, wallDepth); // x is width, y is height, z is depth

@@ -1,5 +1,6 @@
 using UnityEngine;
 
+[RequireComponent(typeof(Reflectivity))]
 public class Obs1 : MonoBehaviour
 {
     private GameObject pillar;
@@ -26,6 +27,7 @@ public class Obs1 : MonoBehaviour
 
         // Vertical Pillar
         pillar = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        pillar.AddComponent<Reflectivity>().reflectivity = 20f;
         pillar.transform.SetParent(this.transform);
         pillar.transform.localPosition = new Vector3(0, pillarHeight, 0);
         pillar.transform.localScale = new Vector3(pillarRadius, pillarHeight, pillarRadius);
