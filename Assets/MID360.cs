@@ -1,9 +1,34 @@
-// Lidar Simulation using Segment Selection
-
-
 using UnityEngine;
 using Unity.Collections;
+using Unity.Burst;
+using Unity.Jobs;
+using Unity.Mathematics;
 using System.Collections.Generic;
+
+[BurstCompile]
+public struct MarsagliaNoiseJob : IJobParallelFor
+{
+    public NativeArray<float> noiseVector;  // length = pairCount*2
+    public uint baseSeed;
+
+    public void Execute(int i)
+    {
+        // Each Execute(i) writes two floats at 2*i and 2*i+1
+        var rng = new Unity.Mathematics.Random(baseSeed + (uint)i);
+        float2 u;
+        float s;
+        do
+        {
+            u = rng.NextFloat2(new float2(-1f), new float2(1f));
+            s = math.lengthsq(u);
+        }
+        while (s >= 1f || s == 0f);
+
+        float factor = math.sqrt(-2f * math.log(s) / s);
+        noiseVector[2 * i] = u.x * factor;
+        noiseVector[2 * i + 1] = u.y * factor;
+    }
+}
 
 public struct LidarRayGrid // This struct defines a grid of lidar rays for the MID360, with azimuth and elevation steps.
 {
@@ -87,7 +112,7 @@ public class MID360 : MonoBehaviour
     public int section; // This determines which section of the MID360's lidar pattern is being casted. It increments from 1 to the physics sim rate, and then loops back to 1.
     public int sectionCount; // Total number of vertical lines of lidar rays in each section
     public int totalSections; // Number of sections in each full 360-degree scan
-    public int scanRate = environmentData.simRate; // The scan rate of the MID360, as per data sheet, in Hz
+    public int scanRate; // The scan rate of the MID360, as per data sheet, in Hz
     public float maxDistance; // Maximum distance for raycasting. This value is arbitrary.
     public float minDistance; // Minimum distance for raycasting, based on datasheet
     public float hitRegistrationExponent; // hitRegistration determines if an object that is hit by a raycast should be registered according to its reflectivity and distance.
@@ -133,8 +158,15 @@ public class MID360 : MonoBehaviour
         angleSigma = 0.15f;
         distanceSigma = 0.03f;
 
-        // Initialize the noise vector for generating random points within the unit circle
-        noiseVector = new NativeArray<float>(Mathf.CeilToInt(sectionCount * elevationSteps * 3 / 2), Allocator.Persistent);
+        desiredNoiseLength = Mathf.CeilToInt(sectionCount * elevationSteps * 3); // Number of Gaussian observations needed. Should be equal to 3 * number of rays being cast every frame.
+        // Ensure length is even
+        if (desiredNoiseLength % 2 != 0)
+            desiredNoiseLength++;
+        pairCount = desiredNoiseLength / 2;
+
+        // Allocate once; reuse every frame
+        noiseVector = new NativeArray<float>(desiredNoiseLength, Allocator.Persistent);
+        masterSeed = (uint)UnityEngine.Random.Range(int.MinValue, int.MaxValue);
 
         // Initialize the list of active markers
         activeMarkers = new List<GameObject>();
@@ -177,23 +209,24 @@ public class MID360 : MonoBehaviour
     {
         float t0 = Time.realtimeSinceStartup; // Find real time
 
-        for (int i = 0; i < noiseVector.Length / 2;)
-        {
-            // Generate a random point within the unit circle
-            float x = Random.Range(-1f, 1f);
-            float y = Random.Range(-1f, 1f);
-            float s = x * x + y * y;
-            while (s >= 1 || s <= 0) // Ensure the point is within the unit circle
-            {
-                x = Random.Range(-1f, 1f);
-                y = Random.Range(-1f, 1f);
-                s = x * x + y * y;
-            }
-            // Store the generated noise in the noise vector
-            noiseVector[i] = x * Mathf.Sqrt(-2f * Mathf.Log(s) / s); // Marsaglia polar method for generating observations of N(0,1)
-            noiseVector[i+1] = y * Mathf.Sqrt(-2f * Mathf.Log(s) / s);
-            i += 2;
-        }
+        // OLD UNOPTIMIZED NOISE GENERATION
+        //for (int i = 0; i < noiseVector.Length / 2;)
+        //{
+        //    // Generate a random point within the unit circle
+        //    float x = Random.Range(-1f, 1f);
+        //    float y = Random.Range(-1f, 1f);
+        //    float s = x * x + y * y;
+        //    while (s >= 1 || s <= 0) // Ensure the point is within the unit circle
+        //    {
+        //        x = Random.Range(-1f, 1f);
+        //        y = Random.Range(-1f, 1f);
+        //        s = x * x + y * y;
+        //    }
+        //    // Store the generated noise in the noise vector
+        //    noiseVector[i] = x * Mathf.Sqrt(-2f * Mathf.Log(s) / s); // Marsaglia polar method for generating observations of N(0,1)
+        //    noiseVector[i+1] = y * Mathf.Sqrt(-2f * Mathf.Log(s) / s);
+        //    i += 2;
+        //}
 
         //if (activeMarkers.Count > 90000)
         //{
@@ -285,6 +318,7 @@ public class MID360 : MonoBehaviour
     void OnDestroy()
     {
         rayGrid.Dispose();
+        noiseVector.Dispose();
     }
 
 
