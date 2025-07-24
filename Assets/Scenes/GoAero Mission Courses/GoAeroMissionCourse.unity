@@ -129,6 +129,7 @@ GameObject:
   m_Component:
   - component: {fileID: 102877730}
   - component: {fileID: 102877731}
+  - component: {fileID: 102877732}
   m_Layer: 0
   m_Name: Obs 1
   m_TagString: Untagged
@@ -163,6 +164,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6774cdfa1f6a9664e99d473b318b2bef, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &102877732
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 102877729}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aca5195b01e82354c9db288a4d6e3840, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  reflectivity: 20
 --- !u!1 &254789709
 GameObject:
   m_ObjectHideFlags: 0
@@ -173,6 +187,7 @@ GameObject:
   m_Component:
   - component: {fileID: 254789710}
   - component: {fileID: 254789711}
+  - component: {fileID: 254789712}
   m_Layer: 0
   m_Name: CourseFloor
   m_TagString: Untagged
@@ -207,6 +222,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1b431e0ac6547ca4aadce712492222ca, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &254789712
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 254789709}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aca5195b01e82354c9db288a4d6e3840, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  reflectivity: 20
 --- !u!1 &749069047
 GameObject:
   m_ObjectHideFlags: 0
@@ -217,6 +245,7 @@ GameObject:
   m_Component:
   - component: {fileID: 749069048}
   - component: {fileID: 749069049}
+  - component: {fileID: 749069050}
   m_Layer: 0
   m_Name: Obs 2
   m_TagString: Untagged
@@ -251,6 +280,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 71b314be27f95524c8a61d484730063f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &749069050
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 749069047}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aca5195b01e82354c9db288a4d6e3840, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  reflectivity: 20
 --- !u!1 &768352034
 GameObject:
   m_ObjectHideFlags: 0
@@ -349,6 +391,7 @@ GameObject:
   m_Component:
   - component: {fileID: 991101394}
   - component: {fileID: 991101395}
+  - component: {fileID: 991101396}
   m_Layer: 0
   m_Name: Obs 3
   m_TagString: Untagged
@@ -383,6 +426,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a5ddbbd0ec042bc4589dd64ae10cd8f4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &991101396
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 991101393}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: aca5195b01e82354c9db288a4d6e3840, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  reflectivity: 20
 --- !u!1001 &1108304132
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -528,6 +584,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1544577402}
   - component: {fileID: 1544577403}
+  - component: {fileID: 1544577404}
   m_Layer: 0
   m_Name: Obs 4
   m_TagString: Untagged
@@ -562,50 +619,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8c8bba1ba06bf3240b3194d01882702e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
---- !u!1 &1653241056
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1653241058}
-  - component: {fileID: 1653241057}
-  m_Layer: 0
-  m_Name: SingleRayLidar
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1653241057
+--- !u!114 &1544577404
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1653241056}
+  m_GameObject: {fileID: 1544577401}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e9f9960ee2e301d43b4944bec8b2a8eb, type: 3}
+  m_Script: {fileID: 11500000, guid: aca5195b01e82354c9db288a4d6e3840, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
---- !u!4 &1653241058
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1653241056}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 8.385212, y: 2.6810277, z: 25.027851}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  reflectivity: 20
 --- !u!1 &1819375089
 GameObject:
   m_ObjectHideFlags: 0
@@ -753,7 +779,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1835511013}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 3f9e36e7134002448b64c723383e3abc, type: 3}
   m_Name: 
@@ -772,6 +798,10 @@ MonoBehaviour:
   scanRate: 60
   maxDistance: 0
   minDistance: 0
+  hitRegistrationExponent: 0
+  hitRegistrationConstant: 0
+  angleSigma: 0
+  distanceSigma: 0
   hitMarkerPrefab: {fileID: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
@@ -786,4 +816,3 @@ SceneRoots:
   - {fileID: 1835511014}
   - {fileID: 1152553434}
   - {fileID: 925686936}
-  - {fileID: 1653241058}
