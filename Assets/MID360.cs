@@ -8,25 +8,46 @@ using System.Collections.Generic;
 [BurstCompile]
 public struct MarsagliaNoiseJob : IJobParallelFor
 {
-    public NativeArray<float> noiseVector;  // length = pairCount*2
-    public uint baseSeed;
+    [WriteOnly] public NativeArray<float2> noisePairs;  // One pair per i
+    [ReadOnly] public uint baseSeed;
 
     public void Execute(int i)
     {
-        // Each Execute(i) writes two floats at 2*i and 2*i+1
         var rng = new Unity.Mathematics.Random(baseSeed + (uint)i);
-        float2 u;
-        float s;
+        float2 u; float s;
+
+        // generate one Gaussian pair
         do
         {
             u = rng.NextFloat2(new float2(-1f), new float2(1f));
             s = math.lengthsq(u);
-        }
-        while (s >= 1f || s == 0f);
+        } while (s >= 1f || s == 0f);
 
-        float factor = math.sqrt(-2f * math.log(s) / s);
-        noiseVector[2 * i] = u.x * factor;
-        noiseVector[2 * i + 1] = u.y * factor;
+        float f = math.sqrt(-2f * math.log(s) / s);
+
+        noisePairs[i] = u * f;
+    }
+}
+
+[BurstCompile]
+public struct VectorRotationJob : IJobParallelFor
+{
+    [ReadOnly] public NativeArray<Vector3> inputDirections; // Input directions (unrotated)
+    [ReadOnly] public float2 azRotation; // az rotation. x is azimuth, y is zenith
+    [ReadOnly] public NativeArray<float2> noisePairs; // noise rotation
+    [ReadOnly] public float angleSigma;
+    [ReadOnly] public quaternion lidarRotation; // Rotation of the MID360 sensor, used to rotate the input directions to match the sensor's orientation in the world
+    [WriteOnly] public NativeArray<Vector3> outputDirections; // Output directions (rotated by azTransform and their respecitive angular noise values)
+
+
+    public void Execute(int index)
+    {
+        Vector3 dir = inputDirections[index];
+        dir = math.rotate(lidarRotation, dir); // rotate to match lidar's orientation in the world
+        Quaternion azQuaternion= Quaternion.Euler(-azRotation.y, azRotation.x, 0f);  // Calculate az transform
+        Quaternion noiseRotation = Quaternion.Euler(-noisePairs[index].y * angleSigma, noisePairs[index].x * angleSigma, 0f); // Apply noise to the direction vector
+        dir = azQuaternion * noiseRotation * dir; // Apply az and noise rotations to the direction vector
+        outputDirections[index] = dir.normalized; // Store the normalized direction
     }
 }
 
@@ -78,11 +99,10 @@ public struct LidarRayGrid // This struct defines a grid of lidar rays for the M
             for (int el = 0; el < elevationSteps; el++)
             {
                 float elevation = Mathf.Lerp(minElevation, maxElevation, (float)el / (elevationSteps - 1));
-
                 // Note the negative sign on elevation. CCW rotations are considered positive.
                 // Also note that we need 2 distinct rotations. They are separated because Unity applies rotations in the Z->X->Y Order in a LEFT HANDED COORDINATE SYSTEM.
                 // The first rotation is around the local frame's Y axis (yaw), and the second is around the local frame's X axis (elevation).
-                // Note that the x-axis of the local frame is rotated by the first rotation
+                // Note that the x-axis of the local frame is rotated by the first rotation.
                 Quaternion rotation = Quaternion.Euler(-elevation, yaw, 0f); 
                 Vector3 direction = rotation * Vector3.forward;
                 Set(az, el, direction.normalized);
@@ -103,12 +123,13 @@ public class MID360 : MonoBehaviour
     [Header("LiDAR Settings")]
     public int azimuthSteps; // number of azimuth steps around the sensor's 360-degree horizontal field of view
     public int elevationSteps; // number of elevation steps along the sensor's 62.44 vertical field of view (ranging from -7.22 to +55.22, as per LIVOX simulation https://github.com/Livox-SDK/livox_laser_simulation/blob/main/urdf/livox_mid360.xacro)
-    public float azimuthAngle; // the angle by which the lidar scan pattern is rotated horizontally during the az transform
-    public float zenithAngle; // the angle by which the lidar scan pattern is rotated vertically during the az transform
+    public float2 azRotation; // azimuth and zenith rotation angles for the az transform. azRotation.x = azimuth angle, azRotation.y = zenith angle
     public float maxElevation; // top of lidar vertical FOV, as per datasheet (55.22 degrees). The magnitude of the zenith angle in the az transform is then subtracted from this value.
     public float minElevation; // bottom of lidar vertical FOV, as per datasheet (-7.22 degrees). The magnitude of the zenith angle in the az transform is then subtracted from this value.
     public float shrinkage; // The shrinkage angle for the lidar rays
     public LidarRayGrid rayGrid;
+    public NativeArray<Vector3> inputDirections;
+    public NativeArray<Vector3> outputDirections;
     public int section; // This determines which section of the MID360's lidar pattern is being casted. It increments from 1 to the physics sim rate, and then loops back to 1.
     public int sectionCount; // Total number of vertical lines of lidar rays in each section
     public int totalSections; // Number of sections in each full 360-degree scan
@@ -119,7 +140,10 @@ public class MID360 : MonoBehaviour
     public float hitRegistrationConstant; // hitRegistration is calculated as: max distance d for a reflectivity r = hitRegistrationConstant * (r ^ hitRegistrationExponent). If the distance to the object is greater than d, it is not registered.
     public float angleSigma; // Standard deviation of the lidar ray angles, as per datasheet
     public float distanceSigma; // Standard deviation of the lidar ray distances, as per datasheet
-    public NativeArray<float> noiseVector;
+    public NativeArray<float2> noisePairs;
+    public int desiredNoiseLength; // The length of the noise vector, which is equal to 3 * number of rays being cast every frame
+    public int pairCount; // The number of pairs of noise values to generate, which is equal to desiredNoiseLength / 2
+    public uint masterSeed; // The master seed for the random number generator, which is used to generate noise values for the lidar rays
 
     [Header("Hit Marker")]
     public GameObject hitMarkerPrefab;
@@ -133,10 +157,10 @@ public class MID360 : MonoBehaviour
     void Start()
     {
         // Set position 
-        Vector3 position = new Vector3(0, (float)60.10 / 1000 / 2, 1);
-        // new Vector3(environmentData.course3Width / 2,
-        //             (float)60.10 / 1000 / 2,
-        //             2 * environmentData.obstacleDepthSpacing - 3);
+        Vector3 position = // new Vector3(0, (float)60.10 / 1000 / 2, 1);
+         new Vector3(environmentData.course3Width / 2,
+                     (float)60.10 / 1000 / 2,
+                     2 * environmentData.obstacleDepthSpacing - 3);
         this.transform.position = position;
         // TODO: Set rotation if needed
 
@@ -150,10 +174,12 @@ public class MID360 : MonoBehaviour
         scanRate = 10;
         section = 1; // Start at section 1
         sectionCount = azimuthSteps * scanRate / environmentData.simRate; // TODO: Think about this more: what happens if sim rate is not an integer / clean divisor?
+        inputDirections = new NativeArray<Vector3>(sectionCount * elevationSteps, Allocator.Persistent);
+        outputDirections = new NativeArray<Vector3>(sectionCount * elevationSteps, Allocator.Persistent);
         totalSections = environmentData.simRate / scanRate;
         maxDistance = 85f;
         minDistance = 0.1f;
-        hitRegistrationExponent = 0.369f;
+        hitRegistrationExponent = 0.369f; // TODO: Readjust hit registration to match only the 10% and 80% value.
         hitRegistrationConstant = 15.23f;
         angleSigma = 0.15f;
         distanceSigma = 0.03f;
@@ -165,8 +191,8 @@ public class MID360 : MonoBehaviour
         pairCount = desiredNoiseLength / 2;
 
         // Allocate once; reuse every frame
-        noiseVector = new NativeArray<float>(desiredNoiseLength, Allocator.Persistent);
-        masterSeed = (uint)UnityEngine.Random.Range(int.MinValue, int.MaxValue);
+        noisePairs = new NativeArray<float2>(pairCount, Allocator.Persistent);
+        masterSeed = (uint) UnityEngine.Random.Range(int.MinValue, int.MaxValue);
 
         // Initialize the list of active markers
         activeMarkers = new List<GameObject>();
@@ -209,24 +235,12 @@ public class MID360 : MonoBehaviour
     {
         float t0 = Time.realtimeSinceStartup; // Find real time
 
-        // OLD UNOPTIMIZED NOISE GENERATION
-        //for (int i = 0; i < noiseVector.Length / 2;)
-        //{
-        //    // Generate a random point within the unit circle
-        //    float x = Random.Range(-1f, 1f);
-        //    float y = Random.Range(-1f, 1f);
-        //    float s = x * x + y * y;
-        //    while (s >= 1 || s <= 0) // Ensure the point is within the unit circle
-        //    {
-        //        x = Random.Range(-1f, 1f);
-        //        y = Random.Range(-1f, 1f);
-        //        s = x * x + y * y;
-        //    }
-        //    // Store the generated noise in the noise vector
-        //    noiseVector[i] = x * Mathf.Sqrt(-2f * Mathf.Log(s) / s); // Marsaglia polar method for generating observations of N(0,1)
-        //    noiseVector[i+1] = y * Mathf.Sqrt(-2f * Mathf.Log(s) / s);
-        //    i += 2;
-        //}
+        var noiseJob = new MarsagliaNoiseJob
+        {
+            noisePairs = noisePairs,
+            baseSeed = masterSeed
+        };
+        JobHandle noisehandle = noiseJob.Schedule(pairCount, 64);
 
         //if (activeMarkers.Count > 90000)
         //{
@@ -244,62 +258,84 @@ public class MID360 : MonoBehaviour
         // Columns: 0-azimuth, 1-zenith
         if (Mathf.Abs(prevSecond - t0) < Time.fixedDeltaTime) // If time is within 1 deltaT to either second, use that second's az value
         {
-            azimuthAngle = RotationLoader.data[prevSecondInt][0];
-            zenithAngle = RotationLoader.data[prevSecondInt][1];
+            azRotation.x = RotationLoader.data[prevSecondInt][0];
+            azRotation.y = RotationLoader.data[prevSecondInt][1];
         }
         else if (Mathf.Abs(nextSecond - t0) < Time.fixedDeltaTime)
         {
-            azimuthAngle = RotationLoader.data[nextSecondInt][0];
-            zenithAngle = RotationLoader.data[nextSecondInt][1];
+            azRotation.x = RotationLoader.data[nextSecondInt][0];
+            azRotation.y = RotationLoader.data[nextSecondInt][1];
         }
         else // Linearly interpolate between the previous and next az values
         {
             float gradient = RotationLoader.data[nextSecondInt][0] - RotationLoader.data[prevSecondInt][0];
-            azimuthAngle = RotationLoader.data[prevSecondInt][0] + (t0 - prevSecond) * gradient;
+            azRotation.x = RotationLoader.data[prevSecondInt][0] + (t0 - prevSecond) * gradient; // Assign azimuth angle
 
             gradient = RotationLoader.data[nextSecondInt][1] - RotationLoader.data[prevSecondInt][1];
-            zenithAngle = RotationLoader.data[prevSecondInt][1] + (t0 - prevSecond) * gradient;
+            azRotation.y = RotationLoader.data[prevSecondInt][1] + (t0 - prevSecond) * gradient; // Assign zenith angle
         }
 
-
         int start = (section - 1) * sectionCount * elevationSteps;
-        int end = Mathf.Min(section * sectionCount * elevationSteps, azimuthSteps * sectionCount * elevationSteps);
-
-        int iter = 0;
-        for (int ray = start; ray < end; ray++)
+        int end = Mathf.Min(section * sectionCount * elevationSteps - 1, azimuthSteps * sectionCount * elevationSteps - 1);
+        int length = sectionCount * elevationSteps;
+        Debug.Log($"{length} vectors for rotation.");
+        Debug.Log($"inputDirection is {inputDirections.Length} long.");
+        NativeArray<Vector3>.Copy(rayGrid.directions, start, inputDirections, 0, length);
+        
+        noisehandle.Complete();
+        Debug.Log($"Noise job completed. {noisePairs.Length} pairs generated.");
+        Debug.Log($"outputDirections has: {outputDirections.Length} vectors.");
+        var rotateJob = new VectorRotationJob
         {
-            float azimuthNoise = noiseVector[iter]; // Get noise measurements
-            float zenithNoise = noiseVector[iter + 1];
-            float distanceNoise = noiseVector[iter + 2];
-            iter++;
-            
-            Vector3 dir = rayGrid.directions[ray];
-            dir = transform.TransformVector(dir); // rotate to match lidar's orientation in the world
-            Quaternion azRotation = Quaternion.Euler(-zenithAngle, azimuthAngle, 0f);  // Calculate az transform
-            Quaternion noiseRotation = Quaternion.Euler(zenithNoise * angleSigma, azimuthNoise * angleSigma, 0f); // Apply noise to the direction vector
-            dir = azRotation * noiseRotation * dir; // Apply azRotation and noiseRotation to the direction vector
+            inputDirections = inputDirections, // TODO: USE THE INPUT ARRAY, NOT ALL DIRECTIONS
+            azRotation = azRotation,
+            noisePairs = noisePairs,
+            angleSigma = angleSigma,
+            lidarRotation = this.transform.rotation,
+            outputDirections = outputDirections
+        };
+        JobHandle rotatehandle = rotateJob.Schedule(sectionCount * elevationSteps, 8); // TODO: try playing with the batch size for performance
+        rotatehandle.Complete();
+        Debug.Log($"Rotate job completed with {outputDirections.Length} vectors.");
 
+        int iter = sectionCount * elevationSteps; // We've already used 1 pair of noise values per ray for azimuth and zenith angles. We will now use the rest of the noise values in noisePairs for distance noise.
+        
+        for (int ray = 0; ray < sectionCount * elevationSteps; ray++)
+        {
+            Vector3 dir = outputDirections[ray];
             Vector3 origin = transform.position + dir * minDistance; // Start from minimum distance for object detection
 
             if (Physics.Raycast(origin, dir, out RaycastHit hit, maxDistance) &&
-                hit.distance < (hitRegistrationConstant * Mathf.Pow(hit.collider.GetComponent<Reflectivity>().reflectivity, hitRegistrationExponent)))
+                hit.distance < (hitRegistrationConstant * Mathf.Pow(hit.collider.GetComponent<Reflectivity>().reflectivity, hitRegistrationExponent))) // TODO: maybe use a lookup table instead of pow to speed up?
             {
-                //Debug.DrawLine(origin, hit.point, Color.green); // Draw the ray in green if it hits an object that should be registered
+                float distanceNoise;
+                if (ray % 2 == 0)
+                {
+                    distanceNoise = noisePairs[iter].x;
+                }
+                else
+                {
+                    distanceNoise = noisePairs[iter].y;
+                    iter++;
+                }
+
+
+                Debug.DrawLine(origin, hit.point, Color.green); // Draw the ray in green if it hits an object that should be registered
                 hit.point += dir * (distanceNoise * distanceSigma); // Apply distance noise to the hit point
 
-                //// Create and add a marker at the hit point
-                //GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere); // Create a small sphere at the hit point
-                //s.transform.position = hit.point;
-                //s.transform.localScale = Vector3.one * 0.01f;
-                //s.transform.parent = transform;
-                //var col = s.GetComponent<Collider>(); // disable its collider
-                //if (col) col.enabled = false;
-                //var rend = s.GetComponent<Renderer>();
-                //if (rend != null)
-                //{
-                //    rend.material.color = Color.yellow;
-                //}
-                //activeMarkers.Add(s);
+                // Create and add a marker at the hit point
+                GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere); // Create a small sphere at the hit point
+                s.transform.position = hit.point;
+                s.transform.localScale = Vector3.one * 0.01f;
+                s.transform.parent = transform;
+                var col = s.GetComponent<Collider>(); // disable its collider
+                if (col) col.enabled = false;
+                var rend = s.GetComponent<Renderer>();
+                if (rend != null)
+                {
+                    rend.material.color = Color.yellow;
+                }
+                activeMarkers.Add(s);
             }
             //else
             //{
@@ -318,7 +354,9 @@ public class MID360 : MonoBehaviour
     void OnDestroy()
     {
         rayGrid.Dispose();
-        noiseVector.Dispose();
+        noisePairs.Dispose();
+        inputDirections.Dispose();
+        outputDirections.Dispose();
     }
 
 

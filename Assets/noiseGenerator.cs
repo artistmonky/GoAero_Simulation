@@ -15,15 +15,11 @@ public class noiseGenerator : MonoBehaviour
 
     void Update()
     {
-        var job = new MarsagliaNoiseJob
-        {
-            noiseVector = noiseArray,
-            baseSeed = masterSeed
-        };
+        
 
         // Schedule one Execute() per noise-pair
-        JobHandle handle = job.Schedule(pairCount, batchSize: 64);
-        handle.Complete();
+        
+        
 
         // If you need the data immediately on the main thread, read it now:
         // float[] managedNoise = noiseArray.ToArray();
