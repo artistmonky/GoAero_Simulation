@@ -170,13 +170,12 @@ public class MID360_Optimized : MonoBehaviour
     [Header("Scan Sectioning")]
     public int section = 1;
     public int scanRate = 10;
-    public int sectionCount;
+    public int rayCount;
     public int totalSections;
 
     [Header("Debug")]
     public uint masterSeed;
-    public bool debugDraw = true;
-    public bool visualizeOn = true;
+    public bool visualizeOn; // Set this to true to turn on the visualization of lidar hit points
 
     NativeArray<float> distanceNoises;
     NativeArray<Vector3> inputDirections;
@@ -192,6 +191,8 @@ public class MID360_Optimized : MonoBehaviour
 
     void Start()
     {
+        visualizeOn = false;
+
         // Set position
         Vector3 position = // new Vector3(0, (float)60.10 / 1000 / 2, 1);
         new Vector3(environmentData.course3Width / 2,
@@ -209,23 +210,18 @@ public class MID360_Optimized : MonoBehaviour
         rayGrid = new LidarRayGrid(azimuthSteps, elevationSteps, maxElevation, minElevation, Allocator.Persistent);
         scanRate = 10;
         section = 1; // Start at section 1
-        sectionCount = azimuthSteps * scanRate / environmentData.simRate; // TODO: Think about this more: what happens if sim rate is not an integer / clean divisor?
-        inputDirections = new NativeArray<Vector3>(sectionCount * elevationSteps, Allocator.Persistent);
+        rayCount = azimuthSteps * elevationSteps * scanRate / environmentData.simRate;
         //outputDirections = new NativeArray<Vector3>(sectionCount * elevationSteps, Allocator.Persistent);
-        totalSections = environmentData.simRate / scanRate;
         maxDistance = 85f;
         minDistance = 0.1f;
         hitRegistrationExponent = 0.369f; // TODO: Readjust hit registration to match only the 10% and 80% value.
         hitRegistrationConstant = 15.23f;
         angleSigma = 0.15f;
         distanceSigma = 0.03f;
-
-        totalSections = environmentData.simRate / scanRate;
-        sectionCount = azimuthSteps * scanRate / environmentData.simRate;
-
+        totalSections = azimuthSteps * elevationSteps / rayCount;
         rayGrid = new LidarRayGrid(azimuthSteps, elevationSteps, maxElevation, minElevation, Allocator.Persistent);
-        inputDirections = new NativeArray<Vector3>(sectionCount * elevationSteps, Allocator.Persistent);
-        distanceNoises = new NativeArray<float>(sectionCount * elevationSteps, Allocator.Persistent);
+        inputDirections = new NativeArray<Vector3>(rayCount, Allocator.Persistent);
+        distanceNoises = new NativeArray<float>(rayCount, Allocator.Persistent);
         masterSeed = (uint)UnityEngine.Random.Range(int.MinValue, int.MaxValue);
 
         // Create hashmap for fast object reflectiviy lookup
@@ -239,13 +235,10 @@ public class MID360_Optimized : MonoBehaviour
                 reflectivityMap.TryAdd(collider.GetInstanceID(), refl.reflectivity);
         }
 
-        int maxRays = sectionCount * elevationSteps;
-        rayCommands = new NativeArray<RaycastCommand>(maxRays, Allocator.Persistent);
-        rayHits = new NativeArray<RaycastHit>(maxRays, Allocator.Persistent);
-
-        colliderInstanceIDs = new NativeArray<int>(maxRays, Allocator.Persistent);
-
-        acceptedPointsList = new NativeList<float3>(maxRays, Allocator.Persistent);
+        rayCommands = new NativeArray<RaycastCommand>(rayCount, Allocator.Persistent);
+        rayHits = new NativeArray<RaycastHit>(rayCount, Allocator.Persistent);
+        colliderInstanceIDs = new NativeArray<int>(rayCount, Allocator.Persistent);
+        acceptedPointsList = new NativeList<float3>(rayCount, Allocator.Persistent);
         acceptedPoints = acceptedPointsList.AsParallelWriter();
 
         // Load mesh and material from the imported .obj
@@ -321,8 +314,7 @@ public class MID360_Optimized : MonoBehaviour
             azRotation.y = RotationLoader.data[prevSecondInt][1] + (t0 - prevSecond) * gradient; // Assign zenith angle
         }
 
-        int rayCount = sectionCount * elevationSteps;
-        int start = (section - 1) * rayCount;
+        int start = (section - 1) * rayCount; // TODO
 
         NativeArray<Vector3>.Copy(rayGrid.directions, start, inputDirections, 0, rayCount);
 
@@ -351,40 +343,8 @@ public class MID360_Optimized : MonoBehaviour
     void LateUpdate()
     {
         float t0 = Time.realtimeSinceStartup;
-        /*raycastHandle.Complete();
-        for (int i = 0; i < rayHits.Length; i++)
-        {
-            var hit = rayHits[i];
-            //Debug.DrawLine(rayCommands[i].from, hit.point, Color.green);
-            if (hit.collider == null) continue;
-
-            float r = hit.collider.GetComponent<Reflectivity>()?.reflectivity ?? 1f;
-            float threshold = hitRegistrationConstant * Mathf.Pow(r, hitRegistrationExponent);
-            if (hit.distance < threshold && debugDraw)
-            {
-                hit.point += rayCommands[i].direction * distanceNoises[i];
-                Debug.DrawLine(rayCommands[i].from, hit.point, Color.green);
-*//*                  // Create and add a marker at the hit point
-                GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere); // Create a small sphere at the hit point
-                s.transform.position = hit.point;
-                s.transform.localScale = Vector3.one * 0.01f;
-                s.transform.parent = transform;
-                var col = s.GetComponent<Collider>(); // disable its collider
-                if (col) col.enabled = false;
-                var rend = s.GetComponent<Renderer>();
-                if (rend != null)
-                {
-                    rend.material.color = Color.yellow;
-                }
-                activeMarkers.Add(s);*//*
-            }
-        }
-
-        rayCommands.Dispose();
-        rayHits.Dispose();*/
 
         raycastHandle.Complete();
-        int rayCount = sectionCount * elevationSteps;
         for (int i = 0; i < rayCount; i++)
         {
             colliderInstanceIDs[i] = rayHits[i].collider != null
