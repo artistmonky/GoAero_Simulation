@@ -151,7 +151,7 @@ public class MID360_Optimized : MonoBehaviour
 
 
     public string modelPath;
-    //List<GameObject> activeMarkers;
+    List<GameObject> activeMarkers;
     [Header("LiDAR Settings")]
     public int azimuthSteps = 360;
     public int elevationSteps = 40;
@@ -176,6 +176,7 @@ public class MID360_Optimized : MonoBehaviour
     [Header("Debug")]
     public uint masterSeed;
     public bool debugDraw = true;
+    public bool visualizeOn = true;
 
     NativeArray<float> distanceNoises;
     NativeArray<Vector3> inputDirections;
@@ -277,19 +278,22 @@ public class MID360_Optimized : MonoBehaviour
 
         Debug.Log("MID360 model loaded and applied to existing GameObject.");
 
-        //// Initialize the list of active markers
-        //activeMarkers = new List<GameObject>();
+        // Initialize the list of active markers
+        if (visualizeOn) activeMarkers = new List<GameObject>();
     }
 
     void Update()
     {
         float t0 = Time.realtimeSinceStartup;
 
-        /*if (activeMarkers.Count > 90000)
+       if (visualizeOn)
         {
-            for (int i = 0; i < activeMarkers.Count; i++) Destroy(activeMarkers[i]);
-            activeMarkers.Clear();
-        }*/
+            if (activeMarkers.Count > 90000)
+            {
+                for (int i = 0; i < activeMarkers.Count; i++) Destroy(activeMarkers[i]);
+                activeMarkers.Clear();
+            }
+        }
 
         float prevSecond = Mathf.Floor(t0); // Find previous second and next second
         float nextSecond = Mathf.Ceil(t0);
@@ -407,21 +411,24 @@ public class MID360_Optimized : MonoBehaviour
         postHandle.Complete();
 
         // TS below for visualizing scan points
-        /*for (int i = 0; i < acceptedPointsList.Length; ++i)
+        if (visualizeOn)
         {
-            GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere); // Create a small sphere at the hit point
-            s.transform.position = acceptedPointsList[i];
-            s.transform.localScale = Vector3.one * 0.01f;
-            //s.transform.parent = transform;
-            var col = s.GetComponent<Collider>(); // disable its collider
-            if (col) col.enabled = false;
-            var rend = s.GetComponent<Renderer>();
-            if (rend != null)
+            for (int i = 0; i < acceptedPointsList.Length; ++i)
             {
-                rend.material.color = Color.yellow;
+                GameObject s = GameObject.CreatePrimitive(PrimitiveType.Sphere); // Create a small sphere at the hit point
+                s.transform.position = acceptedPointsList[i];
+                s.transform.localScale = Vector3.one * 0.01f;
+                //s.transform.parent = transform;
+                var col = s.GetComponent<Collider>(); // disable its collider
+                if (col) col.enabled = false;
+                var rend = s.GetComponent<Renderer>();
+                if (rend != null)
+                {
+                    rend.material.color = Color.yellow;
+                }
+                activeMarkers.Add(s);
             }
-            activeMarkers.Add(s);
-        }*/
+        }
 
         section = section % totalSections + 1;
         float t1 = Time.realtimeSinceStartup;
